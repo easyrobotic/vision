@@ -69,27 +69,27 @@ class image_converter:
     image,center_dict,blue_center,red_center,green_center = self.image_centers(cv_image,center_dict,blue_center,red_center,green_center)
     try:
         blue_direction = direction(blue_center,self.data_K,"blue")
+        if blue_direction.layout.dim[0].size != 0:
+            self.marker_blue.publish(blue_direction)
     except:
         pass
     try:
         red_direction = direction(red_center,self.data_K,"red")
+        if red_direction.layout.dim[0].size != 0:
+            self.marker_red.publish(red_direction)
     except:
         pass
     try:
         green_direction = direction(green_center,self.data_K,"green")
+        if green_direction.layout.dim[0].size != 0:
+            self.marker_green.publish(green_direction)
     except:
         pass
 
-    try:
-        self.image_pub.publish(self.bridge.cv2_to_imgmsg(cv_image, "bgr8"))
-        if blue_direction.layout.dim[0].size != 0:
-            self.marker_blue.publish(blue_direction)
-        if red_direction.layout.dim[0].size != 0:
-            self.marker_red.publish(red_direction)
-        if green_direction.layout.dim[0].size != 0:
-            self.marker_green.publish(green_direction)
-    except CvBridgeError as e:
-        print(e)
+    self.image_pub.publish(self.bridge.cv2_to_imgmsg(cv_image, "bgr8"))
+
+
+
 
   def camera_info_callback(self,data):
         data_K = data.K
@@ -112,6 +112,8 @@ class lidar_converter:
         self.j=0
         #self.marker_red = rospy.Subscriber("vision/output_data/red_direction",Float64MultiArray,self.red_callback)
         self.angle_increment = 0.2
+        self.listener = tf.TransformListener()
+        #listener2 = tf.TransformListener()
         #self.marker_green = rospy.Subscriber("vision/output_data/green_direction",Float64MultiArray,self.green_callback)
 
     def blue_callback(self,data):
@@ -122,24 +124,26 @@ class lidar_converter:
         blue_pt.header.stamp = self.laser.header.stamp
         blue_pt.header.frame_id = "camera_depth_optical_frame"
         l =len(data.data)
-        listener = tf.TransformListener()
-        listener2 = tf.TransformListener()
+        #listener = tf.TransformListener()
+        #listener2 = tf.TransformListener()
         i=0
         while i<l:
             blue_pt.point.x = round(data.data[i],3)
             blue_pt.point.y = round(data.data[i+1],3)
             blue_pt.point.z = round(data.data[i+2],3)
             try:
-                lidar_blue_pt = listener.transformPoint("rplidar_frame",blue_pt)
-                #print("rp_lidar_frame")
-            except:
+                lidar_blue_pt =self.listener.waitForTransform("camera_depth_optical_frame", "rplidar_frame", rospy.Time(0), rospy.Duration(5.0))
+                lidar_blue_pt =self.listener.transformPoint("rplidar_frame",blue_pt)
+                #print(lidar_blue_pt)
+            except(tf.ConnectivityException, tf.LookupException, tf.ExtrapolationException,tf.Exception):
                 lidar_blue_pt = PointStamped()
+                print("lidar tf error")
                 #print("not rp_lidar_frame tf possible")
-                pass
-
+                continue
             angle =math.atan2(lidar_blue_pt.point.y,lidar_blue_pt.point.x)
             angle_increment = self.angle_increment
             distance = 0
+
             if (0 <= angle) and (angle<=math.pi/2.0):
                     pos = int(round(angle/angle_increment,0))
                     laser_data = self.laser
@@ -156,31 +160,35 @@ class lidar_converter:
             #lidar_blue_pt.header.seq = i/3.0
             lidar_blue_pt.header.stamp = rospy.Time(0)
             lidar_blue_pt.header.frame_id = "rplidar_frame"
+            #try:
+            if (blue_pt.point.x == 1.0):
+                lidar_blue_pt.point.x *= distance
+                lidar_blue_pt.point.y *= distance
+                lidar_blue_pt.point.z *= distance
+                #print("point_x=1",lidar_blue_pt )
+            else:
+                lidar_blue_pt.point.x = (lidar_blue_pt.point.x/lidar_blue_pt.point.x)*distance
+                lidar_blue_pt.point.y = (lidar_blue_pt.point.y/lidar_blue_pt.point.x)*distance
+                lidar_blue_pt.point.z = (lidar_blue_pt.point.z/lidar_blue_pt.point.x)*distance
+                #print("point_x!=1",lidar_blue_pt.point.x)
+            #except:
+            #    lidar_blue_pt = PointStamped()
+            #    continue
             try:
-                if (blue_pt.point.x == 1.0):
-                    lidar_blue_pt.point.x *= distance
-                    lidar_blue_pt.point.y *= distance
-                    lidar_blue_pt.point.z *= distance
-                    #print("point_x=1",lidar_blue_pt )
-
-                else:
-                    lidar_blue_pt.point.x = (lidar_blue_pt.point.x/lidar_blue_pt.point.x)*distance
-                    lidar_blue_pt.point.y = (lidar_blue_pt.point.y/lidar_blue_pt.point.x)*distance
-                    lidar_blue_pt.point.z = (lidar_blue_pt.point.z/lidar_blue_pt.point.x)*distance
-                    #print("point_x!=1",lidar_blue_pt.point.x)
-            except:
-                lidar_blue_pt = PointStamped()
-                continue
-            try:
-                lidar_blue_pt_=listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(5.0))
-                lidar_blue_pt_=listener.transformPoint("map", lidar_blue_pt)
+                lidar_blue_pt_=self.listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(5.0))
+                lidar_blue_pt_=self.listener.transformPoint("map", lidar_blue_pt)
                 #print("blue")
                 #print(lidar_blue_pt_)
                 self.marker_blue_pub.publish(lidar_blue_pt_)
             except (tf.ConnectivityException, tf.LookupException, tf.ExtrapolationException,tf.Exception):
                 lidar_blue_pt_ = PointStamped()
-                print("TF Exception")
-                pass
+                #print(lidar_blue_pt)
+                print("TF blue Exception")
+                continue
+            #print("rp_lidar_frame")
+
+
+
             i+=3
             ##self.j+=1
 
@@ -199,23 +207,24 @@ class lidar_converter:
 
     def red_callback(self,data):
         red_pt = PointStamped()
-        lidar_red_pt = PointStamped()
-        lidar_red_pt_ = PointStamped()
         red_pt.header.seq = self.laser.header.seq
         red_pt.header.stamp = self.laser.header.stamp
         red_pt.header.frame_id = "camera_depth_optical_frame"
         l =len(data.data)
-        listener = tf.TransformListener()
-        listener2 = tf.TransformListener()
+
         i=0
         #rint("red")
         while i<l:
+
+            lidar_red_pt = PointStamped()
+            lidar_red_pt_ = PointStamped()
+
             #print("red")
             red_pt.point.x = data.data[i]
             red_pt.point.y = data.data[i+1]
             red_pt.point.z = data.data[i+2]
             try:
-                lidar_red_pt = listener.transformPoint("rplidar_frame",red_pt)
+                lidar_red_pt = self.listener.transformPoint("rplidar_frame",red_pt)
             except:
                 lidar_red_pt = PointStamped()
                 pass
@@ -254,13 +263,13 @@ class lidar_converter:
                 pass
 
             try:
-                lidar_red_pt_=listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(1.0))
-                lidar_red_pt_=listener.transformPoint("map", lidar_red_pt)
+                lidar_red_pt_=self.listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(1.0))
+                lidar_red_pt_=self.listener.transformPoint("map", lidar_red_pt)
                 self.marker_red_pub.publish(lidar_red_pt_)
                 #print(lidar_red_pt_)
             except (tf.ConnectivityException, tf.LookupException, tf.ExtrapolationException,tf.Exception):
                 lidar_red_pt_ = PointStamped()
-                print("TF Exception")
+                print("TF Red exception")
                 pass
             i+=3
 
@@ -275,15 +284,15 @@ class lidar_converter:
         green_pt.header.stamp = self.laser.header.stamp
         green_pt.header.frame_id = "camera_depth_optical_frame"
         l =len(data.data)
-        listener = tf.TransformListener()
-        listener2 = tf.TransformListener()
+        #listener = tf.TransformListener()
+        #listener2 = tf.TransformListener()
         i=0
         while i<l:
             green_pt.point.x = data.data[i]
             green_pt.point.y = data.data[i+1]
             green_pt.point.z = data.data[i+2]
             try:
-                lidar_green_pt = listener.transformPoint("rplidar_frame",green_pt)
+                lidar_green_pt = self.listener.transformPoint("rplidar_frame",green_pt)
                 #print(lidar_green_pt)
             except:
                 print("1")
@@ -330,8 +339,8 @@ class lidar_converter:
                 lidar_green_pt = PointStamped()
                 pass
             try:
-                lidar_green_pt_=listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(1.0))
-                lidar_green_pt_=listener.transformPoint("map", lidar_green_pt)
+                lidar_green_pt_=self.listener.waitForTransform("rplidar_frame", "map", rospy.Time(0), rospy.Duration(1.0))
+                lidar_green_pt_=self.listener.transformPoint("map", lidar_green_pt)
                 self.marker_green_pub.publish(lidar_green_pt_)
             except (tf.ConnectivityException, tf.LookupException, tf.ExtrapolationException,tf.Exception):
                 lidar_green_pt_ = PointStamped()
